@@ -2,7 +2,7 @@
 // https://github.com/rclone/rclone/blob/master/backend/onedrive/quickxorhash/quickxorhash_test.go
 
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use quickxorhash::*;
+use quickxorhash_native::*;
 
 static TEST_VECTORS: &[(&str, &str)] = &[
         ("", "AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
@@ -83,7 +83,7 @@ fn test_basic() {
         let mut qx = QuickXorHash::new();
         let test_bytes = &BASE64_STANDARD.decode(t).unwrap()[..];
         qx.update(test_bytes);
-        assert_eq!(qx.finalize(), &(BASE64_STANDARD.decode(h).unwrap())[..]);
+        assert_eq!(qx.finalise(), &(BASE64_STANDARD.decode(h).unwrap())[..]);
     }
 }
 
@@ -95,7 +95,7 @@ fn test_chunks() {
             for chunk in BASE64_STANDARD.decode(t).unwrap()[..].chunks(block_size) {
                 qx.update(&chunk[..])
             }
-            assert_eq!(qx.finalize(), &(BASE64_STANDARD.decode(h).unwrap())[..]);
+            assert_eq!(qx.finalise(), &(BASE64_STANDARD.decode(h).unwrap())[..]);
         }
     }
 }

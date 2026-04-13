@@ -1,20 +1,22 @@
 [package]
-name = "quickxorhash"
-description = "Fast implementation of QuickXorHash in Rust."
+name = "quickxorhash-native"
+description = "Rust-backed QuickXorHash implementation with Python bindings."
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-homepage = "https://github.com/guyru/quickxorhash"
-repository = "https://github.com/guyru/quickxorhash"
 categories = ["algorithms"]
 keywords = ["checksum", "digest", "hash", "quickxorhash"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "quickxorhash_native"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+base64 = "0.22.1"
+pyo3 = { version = "0.23.5", features = ["abi3-py39"] }
+sha1 = "0.10.6"
 
 [dev-dependencies]
-base64 = "0.21.0"
 bencher = "0.1.5"
 
 [[bench]]

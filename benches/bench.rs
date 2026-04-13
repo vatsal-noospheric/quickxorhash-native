@@ -1,6 +1,6 @@
 #[macro_use]
 extern crate bencher;
-use quickxorhash::*;
+use quickxorhash_native::*;
 
 use bencher::Bencher;
 
@@ -10,7 +10,7 @@ fn bench_small(bench: &mut Bencher) {
     bench.iter(|| {
         let mut qx = QuickXorHash::new();
         qx.update(&bytes);
-        qx.finalize();
+        qx.finalise();
     });
     bench.bytes = N as u64;
 }
@@ -21,7 +21,7 @@ fn bench_large(bench: &mut Bencher) {
     bench.iter(|| {
         let mut qx = QuickXorHash::new();
         qx.update(&bytes);
-        qx.finalize();
+        qx.finalise();
     });
     bench.bytes = N as u64;
 }
@@ -35,7 +35,7 @@ fn bench_unaligned(bench: &mut Bencher) {
         for block in bytes[..].chunks(BLOCK_SIZE - 1) {
             qx.update(block);
         }
-        qx.finalize();
+        qx.finalise();
     });
     bench.bytes = N as u64;
 }
@@ -43,7 +43,7 @@ fn bench_unaligned(bench: &mut Bencher) {
 fn bench_finalize(bench: &mut Bencher) {
     let mut qx = QuickXorHash::new();
     bench.iter(|| {
-        qx.finalize();
+        qx.finalise();
     });
 }
 

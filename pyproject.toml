@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.13,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "quickxorhash-native"
+description = "Rust-backed QuickXorHash and file-hash helpers for Python."
+readme = "README.md"
+requires-python = ">=3.13"
+dynamic = ["version"]
+license = { text = "MIT OR Apache-2.0" }
+
+[tool.maturin]
+module-name = "quickxorhash_native"
+features = ["pyo3/extension-module"]
