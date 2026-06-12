@@ -1,2 +1,5 @@
 /target
-/Cargo.lock
+/dist
+/.venv
+/.pytest_cache
+/.ruff_cache

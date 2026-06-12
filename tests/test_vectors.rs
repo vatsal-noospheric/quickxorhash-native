@@ -93,7 +93,7 @@ fn test_chunks() {
         for (t, h) in TEST_VECTORS {
             let mut qx = QuickXorHash::new();
             for chunk in BASE64_STANDARD.decode(t).unwrap()[..].chunks(block_size) {
-                qx.update(&chunk[..])
+                qx.update(chunk)
             }
             assert_eq!(qx.finalise(), &(BASE64_STANDARD.decode(h).unwrap())[..]);
         }

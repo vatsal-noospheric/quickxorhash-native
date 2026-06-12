@@ -41,7 +41,7 @@ fn bench_unaligned(bench: &mut Bencher) {
 }
 
 fn bench_finalize(bench: &mut Bencher) {
-    let mut qx = QuickXorHash::new();
+    let qx = QuickXorHash::new();
     bench.iter(|| {
         qx.finalise();
     });

@@ -1,11 +1,13 @@
 [package]
 name = "quickxorhash-native"
 description = "Rust-backed QuickXorHash implementation with Python bindings."
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 categories = ["algorithms"]
 keywords = ["checksum", "digest", "hash", "quickxorhash"]
+repository = "https://github.com/vatsal-noospheric/quickxorhash-native-python"
+readme = "README.md"
 
 [lib]
 name = "quickxorhash_native"
@@ -13,8 +15,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 base64 = "0.22.1"
-pyo3 = { version = "0.23.5", features = ["abi3-py39"] }
-sha1 = "0.10.6"
+pyo3 = { version = "0.29.0", features = ["abi3-py39"] }
+sha1 = "0.11.0"
 
 [dev-dependencies]
 bencher = "0.1.5"

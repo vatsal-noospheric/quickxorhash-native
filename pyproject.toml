@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.13,<2.0"]
+requires = ["maturin>=1.14,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -8,8 +8,43 @@ description = "Rust-backed QuickXorHash and file-hash helpers for Python."
 readme = "README.md"
 requires-python = ">=3.13"
 dynamic = ["version"]
-license = { text = "MIT OR Apache-2.0" }
+license = "MIT OR Apache-2.0"
+authors = [
+	{ name = "Noospheric", email = "71_toluene.sketchy@icloud.com" },
+]
+keywords = ["checksum", "digest", "hash", "onedrive", "quickxorhash"]
+classifiers = [
+	"Development Status :: 4 - Beta",
+	"Intended Audience :: Developers",
+	"License :: OSI Approved :: Apache Software License",
+	"License :: OSI Approved :: MIT License",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.13",
+	"Programming Language :: Python :: 3.14",
+	"Programming Language :: Rust",
+	"Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Repository = "https://github.com/vatsal-noospheric/quickxorhash-native-python"
+Issues = "https://github.com/vatsal-noospheric/quickxorhash-native-python/issues"
 
 [tool.maturin]
 module-name = "quickxorhash_native"
 features = ["pyo3/extension-module"]
+include = [
+	"quickxorhash_native.pyi",
+	"py.typed",
+]
+
+[dependency-groups]
+dev = [
+	"maturin>=1.14,<2.0",
+	"pytest>=9.0.3",
+	"ruff>=0.15.17",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

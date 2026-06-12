@@ -18,6 +18,7 @@ const WIDTH_IN_BYTES: usize = 160 / 8;
 const SHIFT: usize = 11;
 pub const BLOCK_SIZE: usize = 160;
 pub const DEFAULT_HASH_BUFFER_SIZE: usize = 1024 * 1024;
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HashMetadata {
@@ -145,10 +146,19 @@ impl FileHashAccumulator {
     pub fn finalise(&self) -> HashMetadata {
         HashMetadata {
             size: self.total_size,
-            sha1_hash: format!("{:x}", self.sha1.clone().finalize()),
+            sha1_hash: encode_lower_hex(&self.sha1.clone().finalize()),
             quick_xor_hash: self.quick_xor.finalise_base64(),
         }
     }
+}
+
+fn encode_lower_hex(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX_DIGITS[(byte >> 4) as usize] as char);
+        output.push(HEX_DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    output
 }
 
 pub fn calculate_file_hashes<P: AsRef<Path>>(
@@ -169,29 +179,43 @@ pub fn calculate_file_hashes<P: AsRef<Path>>(
     let mut remaining = stop_after;
     let mut buffer = vec![0_u8; buffer_size];
 
-    loop {
-        let read_size = match remaining {
-            Some(remaining_bytes) => remaining_bytes.min(buffer_size),
-            None => buffer_size,
-        };
-
-        if read_size == 0 {
-            break;
-        }
-
-        let bytes_read = reader.read(&mut buffer[..read_size])?;
-        if bytes_read == 0 {
-            break;
-        }
-
+    while let Some(bytes_read) = read_next_chunk(&mut reader, &mut buffer, remaining)? {
         accumulator.update(&buffer[..bytes_read]);
-
-        if let Some(remaining_bytes) = remaining.as_mut() {
-            *remaining_bytes = remaining_bytes.saturating_sub(bytes_read);
-        }
+        reduce_remaining(&mut remaining, bytes_read);
     }
 
     Ok(accumulator.finalise())
+}
+
+fn read_next_chunk<R: Read>(
+    reader: &mut R,
+    buffer: &mut [u8],
+    remaining: Option<usize>,
+) -> IoResult<Option<usize>> {
+    let read_size = next_read_size(remaining, buffer.len());
+    if read_size == 0 {
+        return Ok(None);
+    }
+
+    let bytes_read = reader.read(&mut buffer[..read_size])?;
+    if bytes_read == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(bytes_read))
+}
+
+fn next_read_size(remaining: Option<usize>, buffer_size: usize) -> usize {
+    match remaining {
+        Some(remaining_bytes) => remaining_bytes.min(buffer_size),
+        None => buffer_size,
+    }
+}
+
+fn reduce_remaining(remaining: &mut Option<usize>, bytes_read: usize) {
+    if let Some(remaining_bytes) = remaining.as_mut() {
+        *remaining_bytes = remaining_bytes.saturating_sub(bytes_read);
+    }
 }
 
 fn metadata_to_pydict<'py>(
@@ -243,9 +267,24 @@ fn py_calculate_file_hashes<'py>(
 
 #[pymodule]
 fn quickxorhash_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    add_constants(module)?;
+    add_classes(module)?;
+    add_functions(module)?;
+    Ok(())
+}
+
+fn add_constants(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("BLOCK_SIZE", BLOCK_SIZE)?;
     module.add("DEFAULT_HASH_BUFFER_SIZE", DEFAULT_HASH_BUFFER_SIZE)?;
+    Ok(())
+}
+
+fn add_classes(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyFileHashAccumulator>()?;
+    Ok(())
+}
+
+fn add_functions(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(py_calculate_file_hashes, module)?)?;
     Ok(())
 }
