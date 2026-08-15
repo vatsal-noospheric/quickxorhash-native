@@ -389,7 +389,10 @@ def _inspect_wheel_archive(
         raise ReleaseContractError(
             "version_mismatch", f"wheel metadata version is invalid in {path.name}"
         )
-    if metadata.get("Requires-Python") != policy.requires_python:
+    wheel_requires_python = metadata.get("Requires-Python", "")
+    if _normalise_version_specifiers(
+        wheel_requires_python
+    ) != _normalise_version_specifiers(policy.requires_python):
         raise ReleaseContractError(
             "package_mismatch",
             f"wheel Requires-Python must be {policy.requires_python} in {path.name}",
@@ -534,6 +537,10 @@ def _unique_member(names: list[str], suffix: str, path: Path) -> str:
 
 def _normalise_distribution(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def _normalise_version_specifiers(value: str) -> str:
+    return ",".join(specifier.strip() for specifier in value.split(","))
 
 
 def _sha256(path: Path) -> str:

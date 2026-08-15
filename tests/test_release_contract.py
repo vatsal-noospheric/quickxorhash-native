@@ -87,6 +87,62 @@ class ReleaseContractCliTests(unittest.TestCase):
                 all(re.fullmatch(r"[0-9a-f]{64}  \S+", line) for line in manifest_lines)
             )
 
+    def test_assemble_accepts_canonical_requires_python_whitespace(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+            distribution = repository / "dist"
+            distribution.mkdir()
+            _write_source_contract(repository)
+            _write_wheel(
+                distribution,
+                "macosx_11_0_arm64",
+                requires_python=">=3.14, <3.15",
+            )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_aarch64.manylinux2014_aarch64",
+                requires_python=">=3.14, <3.15",
+            )
+
+            result = _run_contract(
+                repository,
+                "assemble",
+                "--tag",
+                "v2.0.0",
+                "--dist",
+                str(distribution),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_assemble_rejects_different_requires_python_range(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+            distribution = repository / "dist"
+            distribution.mkdir()
+            _write_source_contract(repository)
+            _write_wheel(
+                distribution,
+                "macosx_11_0_arm64",
+                requires_python=">=3.13, <3.15",
+            )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_aarch64.manylinux2014_aarch64",
+            )
+
+            result = _run_contract(
+                repository,
+                "assemble",
+                "--tag",
+                "v2.0.0",
+                "--dist",
+                str(distribution),
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("package_mismatch", result.stderr)
+
     def test_verify_wheel_rejects_a_wheel_for_another_target(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = Path(temporary_directory)
@@ -321,6 +377,7 @@ def _write_wheel(
     *,
     internal_platform_tag: str | None = None,
     include_type_support: bool = True,
+    requires_python: str = ">=3.14,<3.15",
 ) -> Path:
     filename = f"quickxorhash_native-2.0.0-cp314-abi3-{platform_tag}.whl"
     wheel = distribution / filename
@@ -341,9 +398,11 @@ def _write_wheel(
                 Metadata-Version: 2.4
                 Name: quickxorhash-native
                 Version: 2.0.0
-                Requires-Python: >=3.14,<3.15
+                Requires-Python: {requires_python}
                 """
-            ).lstrip(),
+            )
+            .lstrip()
+            .format(requires_python=requires_python),
         )
         archive.writestr(
             f"{dist_info}/WHEEL",
