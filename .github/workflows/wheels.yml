@@ -1,39 +1,155 @@
-name: Wheels
+name: Release candidate
 
 on:
+  pull_request:
   push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag matching Cargo.toml, for example v2.0.0
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+env:
+  MATURIN_VERSION: v1.14.1
+  RUST_TOOLCHAIN: 1.97.1
+
 jobs:
-  build:
-    name: Build wheels
-    runs-on: ${{ matrix.os }}
+  source-gates:
+    name: Source gates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14.7"
+
+      - name: Install Ruff
+        run: python -m pip install "ruff==0.16.3"
+
+      - name: Select pinned Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" \
+            --profile minimal --component rustfmt,clippy
+          rustup default "$RUST_TOOLCHAIN"
+
+      - name: Verify Python source
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Verify release source and tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python -m tools.release_contract preflight --tag "$RELEASE_TAG"
+
+      - name: Verify release contract tests
+        run: python -m unittest tests.test_release_contract
+
+      - name: Verify Rust source
+        run: |
+          cargo fmt --check
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+
+  build-wheel:
+    name: Build ${{ matrix.target_name }} wheel
+    if: github.event_name == 'workflow_dispatch'
+    needs: source-gates
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
-        python-version: ["3.13", "3.14"]
-
+        include:
+          - target_name: macos-arm64
+            runner: macos-14
+            rust_target: aarch64-apple-darwin
+            manylinux: "off"
+            macos_deployment_target: "11.0"
+          - target_name: manylinux-aarch64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            manylinux: "2_17"
+            macos_deployment_target: ""
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.14.7"
 
-      - name: Install maturin
-        run: python -m pip install "maturin>=1.14,<2.0"
-
-      - name: Build wheel
-        run: python -m maturin build --release --out dist
-
-      - name: Upload wheel
-        uses: actions/upload-artifact@v5
+      - name: Build native wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          name: wheels-${{ matrix.os }}-${{ matrix.python-version }}
+          command: build
+          args: --release --locked --out dist
+          manylinux: ${{ matrix.manylinux }}
+          maturin-version: ${{ env.MATURIN_VERSION }}
+          rust-toolchain: ${{ env.RUST_TOOLCHAIN }}
+          target: ${{ matrix.rust_target }}
+
+      - name: Verify installed wheel
+        env:
+          TARGET_NAME: ${{ matrix.target_name }}
+        run: |
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          python -m tools.release_contract verify-wheel \
+            --target "$TARGET_NAME" "${wheels[0]}"
+
+      - name: Run Python contract suite against wheel
+        run: |
+          wheels=(dist/*.whl)
+          python -m pip install "pytest==9.0.3"
+          python -m pip install --no-index --no-deps \
+            --only-binary=:all: "${wheels[0]}"
+          python -m pytest
+
+      - name: Upload verified wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheel-${{ matrix.target_name }}
           path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble-candidate:
+    name: Assemble release candidate
+    if: github.event_name == 'workflow_dispatch'
+    needs: build-wheel
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14.7"
+
+      - name: Download verified wheels
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: wheel-*
+          path: release-dist
+          merge-multiple: true
+
+      - name: Verify exact bundle and generate checksums
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          python -m tools.release_contract assemble \
+            --tag "$RELEASE_TAG" --dist release-dist
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: quickxorhash-native-${{ inputs.release_tag }}
+          path: release-dist/
+          if-no-files-found: error
+          retention-days: 7
