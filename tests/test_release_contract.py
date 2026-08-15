@@ -9,11 +9,29 @@ import textwrap
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
+
+from tools import release_contract
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseContractCliTests(unittest.TestCase):
+    def test_env_builder_failure_preserves_wheel_install_failed_contract(self) -> None:
+        error = subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["python", "-m", "ensurepip"],
+            stderr="ensurepip failed",
+        )
+
+        with mock.patch.object(release_contract.venv, "EnvBuilder") as env_builder:
+            env_builder.return_value.create.side_effect = error
+
+            with self.assertRaises(release_contract.ReleaseContractError) as context:
+                release_contract._run_installed_wheel_smoke(Path("unused.whl"), "2.0.0")
+
+        self.assertEqual(context.exception.code, "wheel_install_failed")
+
     def test_preflight_accepts_matching_source_version_and_tag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = Path(temporary_directory)

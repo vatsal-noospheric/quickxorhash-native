@@ -426,7 +426,7 @@ def _run_installed_wheel_smoke(path: Path, expected_version: str) -> None:
         virtual_environment = environment_root / "venv"
         try:
             venv.EnvBuilder(with_pip=True, clear=True).create(virtual_environment)
-        except OSError as error:
+        except (OSError, subprocess.CalledProcessError) as error:
             raise ReleaseContractError(
                 "wheel_install_failed", f"cannot create clean environment: {error}"
             ) from error

@@ -25,6 +25,9 @@ pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 const CHECKPOINT_MAGIC: &[u8; 4] = b"QXHC";
 pub const HASH_CHECKPOINT_VERSION: u8 = 1;
+const SHA1_BLOCK_SIZE: u64 = 64;
+const SHA1_BLOCK_LENGTH_OFFSET: usize = 20;
+const SHA1_BUFFER_LENGTH_OFFSET: usize = 28;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HashMetadata {
@@ -220,6 +223,22 @@ impl FileHashAccumulator {
         let serialized_sha1 = SerializedState::<Sha1>::try_from(sha1_bytes)
             .map_err(|_| SnapshotError::InvalidFormat)?;
         let sha1 = Sha1::deserialize(&serialized_sha1).map_err(|_| SnapshotError::InvalidFormat)?;
+        let serialized_sha1 = serialized_sha1.as_slice();
+        let sha1_block_length = u64::from_le_bytes(
+            serialized_sha1[SHA1_BLOCK_LENGTH_OFFSET..SHA1_BUFFER_LENGTH_OFFSET]
+                .try_into()
+                .map_err(|_| SnapshotError::InvalidFormat)?,
+        );
+        let sha1_buffer_length = u64::from(serialized_sha1[SHA1_BUFFER_LENGTH_OFFSET]);
+        let sha1_processed_size = sha1_block_length
+            .checked_mul(SHA1_BLOCK_SIZE)
+            .and_then(|length| length.checked_add(sha1_buffer_length))
+            .ok_or(SnapshotError::Corrupt)?;
+        if u64::try_from(total_size).map_err(|_| SnapshotError::InvalidFormat)?
+            != sha1_processed_size
+        {
+            return Err(SnapshotError::Corrupt);
+        }
 
         Ok(Self {
             quick_xor: QuickXorHash {

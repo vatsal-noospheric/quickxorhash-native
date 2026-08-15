@@ -1,7 +1,8 @@
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use quickxorhash_native::{FileHashAccumulator, SnapshotError};
+use quickxorhash_native::{FileHashAccumulator, SnapshotError, BLOCK_SIZE};
 
 const CHECKPOINT_V1_FIXTURE: &str = include_str!("fixtures/checkpoint_v1.txt");
+const CHECKPOINT_SHA1_LENGTH_OFFSET: usize = 4 + 1 + (3 * 8) + BLOCK_SIZE;
 
 fn deterministic_payload(length: usize) -> Vec<u8> {
     (0..length)
@@ -26,6 +27,15 @@ fn rewrite_snapshot_payload_with_checksum(snapshot: &str, offset: usize, value: 
     let checksum = crc32fast::hash(&bytes[..payload_length]).to_le_bytes();
     bytes[payload_length..].copy_from_slice(&checksum);
     BASE64_STANDARD.encode(bytes)
+}
+
+fn checkpoint_sha1_state_range(bytes: &[u8]) -> std::ops::Range<usize> {
+    let length_start = CHECKPOINT_SHA1_LENGTH_OFFSET;
+    let length_end = length_start + 2;
+    let length = usize::from(u16::from_le_bytes(
+        bytes[length_start..length_end].try_into().unwrap(),
+    ));
+    length_end..length_end + length
 }
 
 fn fixture_value(name: &str) -> &str {
@@ -89,6 +99,33 @@ fn restored_checkpoint_matches_uninterrupted_hashes_at_boundaries() {
 
         assert_eq!(restored.finalise(), uninterrupted.finalise());
     }
+}
+
+#[test]
+fn crc_valid_checkpoint_rejects_mixed_sha1_state() {
+    let mut shorter = FileHashAccumulator::new();
+    shorter.update(b"short checkpoint");
+    let shorter_bytes = BASE64_STANDARD.decode(shorter.snapshot()).unwrap();
+
+    let mut longer = FileHashAccumulator::new();
+    longer.update(&deterministic_payload(BLOCK_SIZE));
+    let mut longer_bytes = BASE64_STANDARD.decode(longer.snapshot()).unwrap();
+    let shorter_sha1 = checkpoint_sha1_state_range(&shorter_bytes);
+    let longer_sha1 = checkpoint_sha1_state_range(&longer_bytes);
+    assert_eq!(shorter_sha1.len(), longer_sha1.len());
+    longer_bytes[longer_sha1].copy_from_slice(&shorter_bytes[shorter_sha1]);
+
+    // Keep the longer checkpoint's declared size and QuickXor state, but make
+    // its serialized SHA-1 state come from the shorter checkpoint.
+    let payload_length = longer_bytes.len() - 4;
+    let checksum = crc32fast::hash(&longer_bytes[..payload_length]).to_le_bytes();
+    longer_bytes[payload_length..].copy_from_slice(&checksum);
+
+    let mixed_snapshot = BASE64_STANDARD.encode(longer_bytes);
+    assert!(matches!(
+        FileHashAccumulator::restore(&mixed_snapshot),
+        Err(SnapshotError::Corrupt)
+    ));
 }
 
 #[test]

@@ -37,9 +37,9 @@ dict with:
 
 Version 2 supports CPython 3.14 on macOS ARM64 and Linux AArch64. It is
 native-only: releases contain platform wheels and never a source distribution.
-The extension uses Python's stable ABI from CPython 3.14 onwards, so each target
-has one `cp314-abi3` wheel rather than a separate wheel for each later CPython
-3.14 patch release.
+The extension is built against the CPython 3.14 stable-ABI baseline
+(`cp314-abi3`), but the package's declared support range remains
+`>=3.14,<3.15`; each target has one wheel for the CPython 3.14 patch releases.
 
 ## Development
 
