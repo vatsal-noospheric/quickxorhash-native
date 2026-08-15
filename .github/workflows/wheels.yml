@@ -111,7 +111,7 @@ jobs:
       - name: Run Python contract suite against wheel
         run: |
           wheels=(dist/*.whl)
-          python -m pip install "pytest==9.0.3"
+          python -m pip install "pytest==9.1.1"
           python -m pip install --no-index --no-deps \
             --only-binary=:all: "${wheels[0]}"
           python -m pytest

@@ -44,7 +44,7 @@ The extension is built against the CPython 3.14 stable-ABI baseline
 ## Development
 
 ```bash
-python -m pip install "maturin>=1.14,<2.0" "pytest>=9.0.3" "ruff>=0.15.17"
+python -m pip install "maturin>=1.14.1,<2.0" "pytest>=9.1.1" "ruff>=0.16.3"
 maturin develop -i "$(command -v python)"
 pytest
 ruff check .

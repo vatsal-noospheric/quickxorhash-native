@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.14,<2.0"]
+requires = ["maturin>=1.14.1,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -56,9 +56,9 @@ platform-tags = ["manylinux_2_17_aarch64", "manylinux2014_aarch64"]
 
 [dependency-groups]
 dev = [
-	"maturin>=1.14,<2.0",
-	"pytest>=9.0.3",
-	"ruff>=0.15.17",
+	"maturin>=1.14.1,<2.0",
+	"pytest>=9.1.1",
+	"ruff>=0.16.3",
 ]
 
 [tool.pytest.ini_options]
