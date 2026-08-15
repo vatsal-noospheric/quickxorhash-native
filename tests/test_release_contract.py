@@ -52,7 +52,7 @@ class ReleaseContractCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("version_mismatch", result.stderr)
 
-    def test_assemble_accepts_exact_version_two_arm_wheel_bundle(self) -> None:
+    def test_assemble_accepts_exact_version_three_wheel_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = Path(temporary_directory)
             distribution = repository / "dist"
@@ -64,6 +64,10 @@ class ReleaseContractCliTests(unittest.TestCase):
                     _write_wheel(
                         distribution,
                         "manylinux_2_17_aarch64.manylinux2014_aarch64",
+                    ),
+                    _write_wheel(
+                        distribution,
+                        "manylinux_2_17_x86_64.manylinux2014_x86_64",
                     ),
                 ]
             )
@@ -103,6 +107,11 @@ class ReleaseContractCliTests(unittest.TestCase):
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
                 requires_python=">=3.14, <3.15",
             )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
+                requires_python=">=3.14, <3.15",
+            )
 
             result = _run_contract(
                 repository,
@@ -129,6 +138,10 @@ class ReleaseContractCliTests(unittest.TestCase):
             _write_wheel(
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
+            )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             )
 
             result = _run_contract(
@@ -176,6 +189,10 @@ class ReleaseContractCliTests(unittest.TestCase):
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
             )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
+            )
             (distribution / "quickxorhash-native-2.0.0.tar.gz").write_bytes(b"")
 
             result = _run_contract(
@@ -205,6 +222,10 @@ class ReleaseContractCliTests(unittest.TestCase):
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
             )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
+            )
 
             result = _run_contract(
                 repository,
@@ -228,6 +249,10 @@ class ReleaseContractCliTests(unittest.TestCase):
             _write_wheel(
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
+            )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             )
             (distribution / "SHA256SUMS").write_text("0" * 64 + "  stale.whl\n")
 
@@ -257,6 +282,10 @@ class ReleaseContractCliTests(unittest.TestCase):
             _write_wheel(
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
+            )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             )
 
             result = _run_contract(
@@ -293,6 +322,10 @@ class ReleaseContractCliTests(unittest.TestCase):
             _write_wheel(
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
+            )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             )
 
             result = _run_contract(
@@ -355,6 +388,9 @@ def _write_source_contract(repository: Path) -> None:
 
             [tool.quickxorhash.release.targets.manylinux-aarch64]
             platform-tags = ["manylinux_2_17_aarch64", "manylinux2014_aarch64"]
+
+            [tool.quickxorhash.release.targets.manylinux-x86_64]
+            platform-tags = ["manylinux_2_17_x86_64", "manylinux2014_x86_64"]
             """
         ).lstrip()
     )

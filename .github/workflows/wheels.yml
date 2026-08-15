@@ -77,6 +77,11 @@ jobs:
             rust_target: aarch64-unknown-linux-gnu
             manylinux: "2_17"
             macos_deployment_target: ""
+          - target_name: manylinux-x86_64
+            runner: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-gnu
+            manylinux: "2_17"
+            macos_deployment_target: ""
     runs-on: ${{ matrix.runner }}
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}

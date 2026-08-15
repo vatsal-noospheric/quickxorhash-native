@@ -35,10 +35,10 @@ dict with:
 
 ## Supported runtime
 
-Version 2 supports CPython 3.14 on macOS ARM64 and Linux AArch64. It is
-native-only: releases contain platform wheels and never a source distribution.
-The extension is built against the CPython 3.14 stable-ABI baseline
-(`cp314-abi3`), but the package's declared support range remains
+Version 2 supports CPython 3.14 on macOS ARM64 and Linux AArch64 or x86_64. It
+is native-only: releases contain platform wheels and never a source
+distribution. The extension is built against the CPython 3.14 stable-ABI
+baseline (`cp314-abi3`), but the package's declared support range remains
 `>=3.14,<3.15`; each target has one wheel for the CPython 3.14 patch releases.
 
 ## Development
@@ -71,9 +71,9 @@ python -m tools.release_contract assemble --tag v2.0.0 --dist dist
 Rust absent from `PATH`, then exercises the public hashing and checkpoint API.
 `preflight` validates the source metadata and release tag before any wheel
 builds start.
-`assemble` accepts exactly one macOS ARM64 wheel and one manylinux AArch64
-wheel, rejects source distributions and unexpected assets, and writes a sorted
-`SHA256SUMS` manifest.
+`assemble` accepts exactly one macOS ARM64 wheel plus manylinux AArch64 and
+x86_64 wheels, rejects source distributions and unexpected assets, and writes
+a sorted `SHA256SUMS` manifest.
 
 ## Licence
 
