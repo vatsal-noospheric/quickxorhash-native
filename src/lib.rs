@@ -9,16 +9,25 @@ use std::io::{BufReader, Error, ErrorKind, Read, Result as IoResult};
 use std::path::Path;
 
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use pyo3::exceptions::PyIOError;
+use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
-use sha1::{Digest, Sha1};
+use sha1::{
+    digest::common::hazmat::{SerializableState, SerializedState},
+    Digest, Sha1,
+};
 
 const WIDTH_IN_BYTES: usize = 160 / 8;
 const SHIFT: usize = 11;
 pub const BLOCK_SIZE: usize = 160;
 pub const DEFAULT_HASH_BUFFER_SIZE: usize = 1024 * 1024;
+pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+const CHECKPOINT_MAGIC: &[u8; 4] = b"QXHC";
+pub const HASH_CHECKPOINT_VERSION: u8 = 1;
+const SHA1_BLOCK_SIZE: u64 = 64;
+const SHA1_BLOCK_LENGTH_OFFSET: usize = 20;
+const SHA1_BUFFER_LENGTH_OFFSET: usize = 28;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HashMetadata {
@@ -150,6 +159,168 @@ impl FileHashAccumulator {
             quick_xor_hash: self.quick_xor.finalise_base64(),
         }
     }
+
+    pub fn snapshot(&self) -> String {
+        let sha1_state = self.sha1.serialize();
+        let mut payload =
+            Vec::with_capacity(4 + 1 + 8 + 8 + 8 + BLOCK_SIZE + 2 + sha1_state.len() + 4);
+        payload.extend_from_slice(CHECKPOINT_MAGIC);
+        payload.push(HASH_CHECKPOINT_VERSION);
+        payload.extend_from_slice(&(self.total_size as u64).to_le_bytes());
+        payload.extend_from_slice(&(self.quick_xor.length as u64).to_le_bytes());
+        payload.extend_from_slice(&(self.quick_xor.index as u64).to_le_bytes());
+        payload.extend_from_slice(&self.quick_xor.data);
+        payload.extend_from_slice(&(sha1_state.len() as u16).to_le_bytes());
+        payload.extend_from_slice(sha1_state.as_slice());
+        payload.extend_from_slice(&crc32fast::hash(&payload).to_le_bytes());
+        BASE64_STANDARD.encode(payload)
+    }
+
+    pub fn restore(snapshot: &str) -> Result<Self, SnapshotError> {
+        let bytes = BASE64_STANDARD
+            .decode(snapshot)
+            .map_err(|_| SnapshotError::InvalidEncoding)?;
+        if bytes.len() < 4 {
+            return Err(SnapshotError::InvalidFormat);
+        }
+        let checksum_start = bytes.len() - 4;
+        let (payload, checksum_bytes) = bytes.split_at(checksum_start);
+        let expected_checksum = u32::from_le_bytes(
+            checksum_bytes
+                .try_into()
+                .map_err(|_| SnapshotError::InvalidFormat)?,
+        );
+        if crc32fast::hash(payload) != expected_checksum {
+            return Err(SnapshotError::Corrupt);
+        }
+
+        let mut reader = SnapshotReader::new(payload);
+        if reader.take(4)? != CHECKPOINT_MAGIC {
+            return Err(SnapshotError::InvalidFormat);
+        }
+        let version = reader.take_u8()?;
+        if version != HASH_CHECKPOINT_VERSION {
+            return Err(SnapshotError::UnsupportedVersion(version));
+        }
+        let total_size =
+            usize::try_from(reader.take_u64()?).map_err(|_| SnapshotError::InvalidFormat)?;
+        let quick_xor_length =
+            usize::try_from(reader.take_u64()?).map_err(|_| SnapshotError::InvalidFormat)?;
+        let quick_xor_index =
+            usize::try_from(reader.take_u64()?).map_err(|_| SnapshotError::InvalidFormat)?;
+        let quick_xor_data: [u8; BLOCK_SIZE] = reader
+            .take(BLOCK_SIZE)?
+            .try_into()
+            .map_err(|_| SnapshotError::InvalidFormat)?;
+        let sha1_length = usize::from(reader.take_u16()?);
+        let sha1_bytes = reader.take(sha1_length)?;
+        if !reader.is_finished() {
+            return Err(SnapshotError::InvalidFormat);
+        }
+        if total_size != quick_xor_length || quick_xor_index != quick_xor_length % BLOCK_SIZE {
+            return Err(SnapshotError::Corrupt);
+        }
+        let serialized_sha1 = SerializedState::<Sha1>::try_from(sha1_bytes)
+            .map_err(|_| SnapshotError::InvalidFormat)?;
+        let sha1 = Sha1::deserialize(&serialized_sha1).map_err(|_| SnapshotError::InvalidFormat)?;
+        let serialized_sha1 = serialized_sha1.as_slice();
+        let sha1_block_length = u64::from_le_bytes(
+            serialized_sha1[SHA1_BLOCK_LENGTH_OFFSET..SHA1_BUFFER_LENGTH_OFFSET]
+                .try_into()
+                .map_err(|_| SnapshotError::InvalidFormat)?,
+        );
+        let sha1_buffer_length = u64::from(serialized_sha1[SHA1_BUFFER_LENGTH_OFFSET]);
+        let sha1_processed_size = sha1_block_length
+            .checked_mul(SHA1_BLOCK_SIZE)
+            .and_then(|length| length.checked_add(sha1_buffer_length))
+            .ok_or(SnapshotError::Corrupt)?;
+        if u64::try_from(total_size).map_err(|_| SnapshotError::InvalidFormat)?
+            != sha1_processed_size
+        {
+            return Err(SnapshotError::Corrupt);
+        }
+
+        Ok(Self {
+            quick_xor: QuickXorHash {
+                data: quick_xor_data,
+                length: quick_xor_length,
+                index: quick_xor_index,
+            },
+            sha1,
+            total_size,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SnapshotError {
+    InvalidEncoding,
+    InvalidFormat,
+    UnsupportedVersion(u8),
+    Corrupt,
+}
+
+impl std::fmt::Display for SnapshotError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidEncoding => formatter.write_str("checkpoint is not valid base64"),
+            Self::InvalidFormat => formatter.write_str("checkpoint has an invalid format"),
+            Self::UnsupportedVersion(version) => {
+                write!(formatter, "checkpoint version {version} is not supported")
+            }
+            Self::Corrupt => formatter.write_str("checkpoint integrity validation failed"),
+        }
+    }
+}
+
+impl std::error::Error for SnapshotError {}
+
+struct SnapshotReader<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> SnapshotReader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn take(&mut self, length: usize) -> Result<&'a [u8], SnapshotError> {
+        let end = self
+            .offset
+            .checked_add(length)
+            .ok_or(SnapshotError::InvalidFormat)?;
+        let value = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or(SnapshotError::InvalidFormat)?;
+        self.offset = end;
+        Ok(value)
+    }
+
+    fn take_u8(&mut self) -> Result<u8, SnapshotError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn take_u16(&mut self) -> Result<u16, SnapshotError> {
+        Ok(u16::from_le_bytes(
+            self.take(2)?
+                .try_into()
+                .map_err(|_| SnapshotError::InvalidFormat)?,
+        ))
+    }
+
+    fn take_u64(&mut self) -> Result<u64, SnapshotError> {
+        Ok(u64::from_le_bytes(
+            self.take(8)?
+                .try_into()
+                .map_err(|_| SnapshotError::InvalidFormat)?,
+        ))
+    }
+
+    fn is_finished(&self) -> bool {
+        self.offset == self.bytes.len()
+    }
 }
 
 fn encode_lower_hex(bytes: &[u8]) -> String {
@@ -250,6 +421,17 @@ impl PyFileHashAccumulator {
     fn finalise<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         metadata_to_pydict(py, &self.inner.finalise())
     }
+
+    fn snapshot(&self) -> String {
+        self.inner.snapshot()
+    }
+
+    #[staticmethod]
+    fn restore(snapshot: &str) -> PyResult<Self> {
+        FileHashAccumulator::restore(snapshot)
+            .map(|inner| Self { inner })
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
 }
 
 #[pyfunction(name = "calculate_file_hashes")]
@@ -274,8 +456,10 @@ fn quickxorhash_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 fn add_constants(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add("__version__", PACKAGE_VERSION)?;
     module.add("BLOCK_SIZE", BLOCK_SIZE)?;
     module.add("DEFAULT_HASH_BUFFER_SIZE", DEFAULT_HASH_BUFFER_SIZE)?;
+    module.add("HASH_CHECKPOINT_VERSION", HASH_CHECKPOINT_VERSION)?;
     Ok(())
 }
 

@@ -23,6 +23,9 @@ accumulator.update(b"world")
 incremental_result = accumulator.finalise()
 ```
 
+The module exposes `__version__`, `BLOCK_SIZE`, `DEFAULT_HASH_BUFFER_SIZE`, and
+`HASH_CHECKPOINT_VERSION` alongside the hashing interface.
+
 `calculate_file_hashes(path, stop_after=None, buffer_size=1048576)` returns a
 dict with:
 
@@ -30,24 +33,47 @@ dict with:
 - `sha1_hash`: lowercase hexadecimal SHA1 digest
 - `quick_xor_hash`: base64 QuickXorHash digest
 
+## Supported runtime
+
+Version 2 supports CPython 3.14 on macOS ARM64 and Linux AArch64. It is
+native-only: releases contain platform wheels and never a source distribution.
+The extension is built against the CPython 3.14 stable-ABI baseline
+(`cp314-abi3`), but the package's declared support range remains
+`>=3.14,<3.15`; each target has one wheel for the CPython 3.14 patch releases.
+
 ## Development
 
 ```bash
 python -m pip install "maturin>=1.14,<2.0" "pytest>=9.0.3" "ruff>=0.15.17"
 maturin develop -i "$(command -v python)"
 pytest
+ruff check .
+ruff format --check .
 cargo test
 ```
 
-Build a wheel:
+Build a wheel for development:
 
 ```bash
 maturin build --release --out dist
 ```
 
-The `Wheels` GitHub Actions workflow builds release wheels for Python 3.13 and
-3.14 on Linux and macOS. Publish and consume those wheels from a tag before
-removing Rust build dependencies from downstream deployment environments.
+Release candidates must pass the repository-owned release contract:
+
+```bash
+python -m tools.release_contract preflight --tag v2.0.0
+python -m tools.release_contract verify-wheel \
+  --target macos-arm64 dist/quickxorhash_native-2.0.0-cp314-abi3-macosx_11_0_arm64.whl
+python -m tools.release_contract assemble --tag v2.0.0 --dist dist
+```
+
+`verify-wheel` installs the wheel into a clean CPython 3.14 environment with
+Rust absent from `PATH`, then exercises the public hashing and checkpoint API.
+`preflight` validates the source metadata and release tag before any wheel
+builds start.
+`assemble` accepts exactly one macOS ARM64 wheel and one manylinux AArch64
+wheel, rejects source distributions and unexpected assets, and writes a sorted
+`SHA256SUMS` manifest.
 
 ## Licence
 
