@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
@@ -17,6 +18,43 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseContractCliTests(unittest.TestCase):
+    def test_repository_assembles_only_the_two_supported_arm_wheels(self) -> None:
+        with (REPOSITORY_ROOT / "Cargo.toml").open("rb") as source:
+            version = tomllib.load(source)["package"]["version"]
+        with tempfile.TemporaryDirectory() as temporary:
+            distribution = Path(temporary)
+            for platform_tag in (
+                "macosx_11_0_arm64",
+                "manylinux_2_17_aarch64.manylinux2014_aarch64",
+            ):
+                _write_wheel(distribution, platform_tag, version=version)
+            result = _run_contract(
+                REPOSITORY_ROOT,
+                "assemble",
+                "--tag",
+                f"v{version}",
+                "--dist",
+                str(distribution),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                len((distribution / "SHA256SUMS").read_text().splitlines()), 2
+            )
+            _write_wheel(
+                distribution,
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
+                version=version,
+            )
+            rejected = _run_contract(
+                REPOSITORY_ROOT,
+                "assemble",
+                "--tag",
+                f"v{version}",
+                "--dist",
+                str(distribution),
+            )
+            self.assertEqual(rejected.returncode, 2, rejected.stderr)
+
     def test_env_builder_failure_preserves_wheel_install_failed_contract(self) -> None:
         error = subprocess.CalledProcessError(
             returncode=1,
@@ -52,7 +90,7 @@ class ReleaseContractCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("version_mismatch", result.stderr)
 
-    def test_assemble_accepts_exact_version_three_wheel_bundle(self) -> None:
+    def test_assemble_accepts_exact_version_two_wheel_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = Path(temporary_directory)
             distribution = repository / "dist"
@@ -64,10 +102,6 @@ class ReleaseContractCliTests(unittest.TestCase):
                     _write_wheel(
                         distribution,
                         "manylinux_2_17_aarch64.manylinux2014_aarch64",
-                    ),
-                    _write_wheel(
-                        distribution,
-                        "manylinux_2_17_x86_64.manylinux2014_x86_64",
                     ),
                 ]
             )
@@ -107,11 +141,6 @@ class ReleaseContractCliTests(unittest.TestCase):
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
                 requires_python=">=3.14, <3.15",
             )
-            _write_wheel(
-                distribution,
-                "manylinux_2_17_x86_64.manylinux2014_x86_64",
-                requires_python=">=3.14, <3.15",
-            )
 
             result = _run_contract(
                 repository,
@@ -138,10 +167,6 @@ class ReleaseContractCliTests(unittest.TestCase):
             _write_wheel(
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
-            )
-            _write_wheel(
-                distribution,
-                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             )
 
             result = _run_contract(
@@ -189,10 +214,6 @@ class ReleaseContractCliTests(unittest.TestCase):
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
             )
-            _write_wheel(
-                distribution,
-                "manylinux_2_17_x86_64.manylinux2014_x86_64",
-            )
             (distribution / "quickxorhash-native-2.0.0.tar.gz").write_bytes(b"")
 
             result = _run_contract(
@@ -222,10 +243,6 @@ class ReleaseContractCliTests(unittest.TestCase):
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
             )
-            _write_wheel(
-                distribution,
-                "manylinux_2_17_x86_64.manylinux2014_x86_64",
-            )
 
             result = _run_contract(
                 repository,
@@ -249,10 +266,6 @@ class ReleaseContractCliTests(unittest.TestCase):
             _write_wheel(
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
-            )
-            _write_wheel(
-                distribution,
-                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             )
             (distribution / "SHA256SUMS").write_text("0" * 64 + "  stale.whl\n")
 
@@ -282,10 +295,6 @@ class ReleaseContractCliTests(unittest.TestCase):
             _write_wheel(
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
-            )
-            _write_wheel(
-                distribution,
-                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             )
 
             result = _run_contract(
@@ -322,10 +331,6 @@ class ReleaseContractCliTests(unittest.TestCase):
             _write_wheel(
                 distribution,
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
-            )
-            _write_wheel(
-                distribution,
-                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             )
 
             result = _run_contract(
@@ -388,9 +393,6 @@ def _write_source_contract(repository: Path) -> None:
 
             [tool.quickxorhash.release.targets.manylinux-aarch64]
             platform-tags = ["manylinux_2_17_aarch64", "manylinux2014_aarch64"]
-
-            [tool.quickxorhash.release.targets.manylinux-x86_64]
-            platform-tags = ["manylinux_2_17_x86_64", "manylinux2014_x86_64"]
             """
         ).lstrip()
     )
@@ -414,10 +416,11 @@ def _write_wheel(
     internal_platform_tag: str | None = None,
     include_type_support: bool = True,
     requires_python: str = ">=3.14,<3.15",
+    version: str = "2.0.0",
 ) -> Path:
-    filename = f"quickxorhash_native-2.0.0-cp314-abi3-{platform_tag}.whl"
+    filename = f"quickxorhash_native-{version}-cp314-abi3-{platform_tag}.whl"
     wheel = distribution / filename
-    dist_info = "quickxorhash_native-2.0.0.dist-info"
+    dist_info = f"quickxorhash_native-{version}.dist-info"
     internal_platform_tag = internal_platform_tag or platform_tag
     wheel_tags = "\n".join(
         f"Tag: cp314-abi3-{tag}" for tag in internal_platform_tag.split(".")
@@ -433,12 +436,12 @@ def _write_wheel(
                 """
                 Metadata-Version: 2.4
                 Name: quickxorhash-native
-                Version: 2.0.0
+                Version: {version}
                 Requires-Python: {requires_python}
                 """
             )
             .lstrip()
-            .format(requires_python=requires_python),
+            .format(requires_python=requires_python, version=version),
         )
         archive.writestr(
             f"{dist_info}/WHEEL",

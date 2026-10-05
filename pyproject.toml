@@ -54,9 +54,6 @@ platform-tags = ["macosx_11_0_arm64"]
 [tool.quickxorhash.release.targets.manylinux-aarch64]
 platform-tags = ["manylinux_2_17_aarch64", "manylinux2014_aarch64"]
 
-[tool.quickxorhash.release.targets.manylinux-x86_64]
-platform-tags = ["manylinux_2_17_x86_64", "manylinux2014_x86_64"]
-
 [dependency-groups]
 dev = [
 	"maturin>=1.14.1,<2.0",

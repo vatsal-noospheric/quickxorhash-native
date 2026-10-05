@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag matching Cargo.toml, for example v2.0.0
+        description: Release tag matching Cargo.toml, for example v2.0.1
         required: true
         type: string
 
@@ -75,11 +75,6 @@ jobs:
           - target_name: manylinux-aarch64
             runner: ubuntu-24.04-arm
             rust_target: aarch64-unknown-linux-gnu
-            manylinux: "2_17"
-            macos_deployment_target: ""
-          - target_name: manylinux-x86_64
-            runner: ubuntu-24.04
-            rust_target: x86_64-unknown-linux-gnu
             manylinux: "2_17"
             macos_deployment_target: ""
     runs-on: ${{ matrix.runner }}

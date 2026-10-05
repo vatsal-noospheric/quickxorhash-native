@@ -177,3 +177,19 @@ fn invalid_checkpoint_magic_is_rejected() {
         Err(SnapshotError::InvalidFormat)
     ));
 }
+
+#[test]
+fn oversized_checkpoint_is_rejected_before_base64_decoding() {
+    let encoded_length = FileHashAccumulator::new().snapshot().len();
+    let invalid_encoding = "!".repeat(encoded_length + 4);
+    assert!(matches!(
+        FileHashAccumulator::restore(&invalid_encoding),
+        Err(SnapshotError::InvalidFormat)
+    ));
+
+    let oversized_base64 = "A".repeat(8 * 1024 * 1024);
+    assert!(matches!(
+        FileHashAccumulator::restore(&oversized_base64),
+        Err(SnapshotError::InvalidFormat)
+    ));
+}

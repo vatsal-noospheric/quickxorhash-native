@@ -9,9 +9,10 @@ use std::io::{BufReader, Error, ErrorKind, Read, Result as IoResult};
 use std::path::Path;
 
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use pyo3::exceptions::{PyIOError, PyValueError};
+use pyo3::buffer::PyBuffer;
+use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
+use pyo3::types::{PyBytes, PyDict, PyModule};
 use sha1::{
     digest::common::hazmat::{SerializableState, SerializedState},
     Digest, Sha1,
@@ -25,6 +26,8 @@ pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 const CHECKPOINT_MAGIC: &[u8; 4] = b"QXHC";
 pub const HASH_CHECKPOINT_VERSION: u8 = 1;
+// Magic, version, three u64 fields, QuickXor state, SHA1 length, and CRC32.
+const CHECKPOINT_FIXED_SIZE: usize = 4 + 1 + 8 + 8 + 8 + BLOCK_SIZE + 2 + 4;
 const SHA1_BLOCK_SIZE: u64 = 64;
 const SHA1_BLOCK_LENGTH_OFFSET: usize = 20;
 const SHA1_BUFFER_LENGTH_OFFSET: usize = 28;
@@ -69,8 +72,7 @@ impl QuickXorHash {
         if bytes.len() > prefix {
             debug_assert!(self.index == 0);
 
-            let chunks = bytes[prefix..].chunks_exact(BLOCK_SIZE);
-            let tail = chunks.remainder();
+            let (chunks, tail) = bytes[prefix..].as_chunks::<BLOCK_SIZE>();
 
             for block in chunks {
                 self.data
@@ -162,8 +164,7 @@ impl FileHashAccumulator {
 
     pub fn snapshot(&self) -> String {
         let sha1_state = self.sha1.serialize();
-        let mut payload =
-            Vec::with_capacity(4 + 1 + 8 + 8 + 8 + BLOCK_SIZE + 2 + sha1_state.len() + 4);
+        let mut payload = Vec::with_capacity(CHECKPOINT_FIXED_SIZE + sha1_state.len());
         payload.extend_from_slice(CHECKPOINT_MAGIC);
         payload.push(HASH_CHECKPOINT_VERSION);
         payload.extend_from_slice(&(self.total_size as u64).to_le_bytes());
@@ -177,6 +178,11 @@ impl FileHashAccumulator {
     }
 
     pub fn restore(snapshot: &str) -> Result<Self, SnapshotError> {
+        let max_encoded_length =
+            (CHECKPOINT_FIXED_SIZE + SerializedState::<Sha1>::default().len()).div_ceil(3) * 4;
+        if snapshot.len() > max_encoded_length {
+            return Err(SnapshotError::InvalidFormat);
+        }
         let bytes = BASE64_STANDARD
             .decode(snapshot)
             .map_err(|_| SnapshotError::InvalidEncoding)?;
@@ -400,6 +406,9 @@ fn metadata_to_pydict<'py>(
     Ok(dict)
 }
 
+// Keep short Python calls attached: the measured 1 KiB path is sub-microsecond.
+const PYTHON_DETACH_MIN_BYTES: usize = 1024 * 1024;
+
 #[pyclass(name = "FileHashAccumulator")]
 struct PyFileHashAccumulator {
     inner: FileHashAccumulator,
@@ -414,8 +423,26 @@ impl PyFileHashAccumulator {
         }
     }
 
-    fn update(&mut self, chunk: &[u8]) {
-        self.inner.update(chunk);
+    fn update(&mut self, chunk: &Bound<'_, PyAny>) -> PyResult<()> {
+        if let Ok(bytes) = chunk.cast::<PyBytes>() {
+            // PyBytes is immutable and the bound argument keeps its storage alive.
+            self.update_bytes(chunk.py(), bytes.as_bytes());
+            return Ok(());
+        }
+
+        let buffer = PyBuffer::<u8>::get(chunk)
+            .map_err(|_| PyTypeError::new_err("expected a C-contiguous unsigned-byte buffer"))?;
+        if !buffer.is_c_contiguous() {
+            return Err(PyTypeError::new_err(
+                "expected a C-contiguous unsigned-byte buffer",
+            ));
+        }
+        let bytes = buffer.to_vec(chunk.py())?;
+        // Release the Python buffer export while attached. Detached Rust work
+        // owns the copy, so the exporter can be mutated or resized independently.
+        drop(buffer);
+        self.update_bytes(chunk.py(), &bytes);
+        Ok(())
     }
 
     fn finalise<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
@@ -434,6 +461,18 @@ impl PyFileHashAccumulator {
     }
 }
 
+impl PyFileHashAccumulator {
+    fn update_bytes(&mut self, py: Python<'_>, bytes: &[u8]) {
+        // The pymethod mutable borrow remains held while detached. PyO3 rejects
+        // overlapping update/finalise/snapshot calls instead of sharing state.
+        if bytes.len() >= PYTHON_DETACH_MIN_BYTES {
+            py.detach(|| self.inner.update(bytes));
+        } else {
+            self.inner.update(bytes);
+        }
+    }
+}
+
 #[pyfunction(name = "calculate_file_hashes")]
 #[pyo3(signature = (path, stop_after=None, buffer_size=DEFAULT_HASH_BUFFER_SIZE))]
 fn py_calculate_file_hashes<'py>(
@@ -442,7 +481,9 @@ fn py_calculate_file_hashes<'py>(
     stop_after: Option<usize>,
     buffer_size: usize,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let metadata = calculate_file_hashes(path, stop_after, buffer_size)
+    let path = path.to_owned();
+    let metadata = py
+        .detach(move || calculate_file_hashes(path, stop_after, buffer_size))
         .map_err(|error| PyIOError::new_err(error.to_string()))?;
     metadata_to_pydict(py, &metadata)
 }
