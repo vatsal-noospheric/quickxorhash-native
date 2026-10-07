@@ -18,7 +18,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseContractCliTests(unittest.TestCase):
-    def test_repository_assembles_only_the_two_supported_arm_wheels(self) -> None:
+    def test_repository_assembles_exactly_the_three_supported_wheels(self) -> None:
         with (REPOSITORY_ROOT / "Cargo.toml").open("rb") as source:
             version = tomllib.load(source)["package"]["version"]
         with tempfile.TemporaryDirectory() as temporary:
@@ -26,6 +26,7 @@ class ReleaseContractCliTests(unittest.TestCase):
             for platform_tag in (
                 "macosx_11_0_arm64",
                 "manylinux_2_17_aarch64.manylinux2014_aarch64",
+                "manylinux_2_17_x86_64.manylinux2014_x86_64",
             ):
                 _write_wheel(distribution, platform_tag, version=version)
             result = _run_contract(
@@ -38,13 +39,9 @@ class ReleaseContractCliTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
-                len((distribution / "SHA256SUMS").read_text().splitlines()), 2
+                len((distribution / "SHA256SUMS").read_text().splitlines()), 3
             )
-            _write_wheel(
-                distribution,
-                "manylinux_2_17_x86_64.manylinux2014_x86_64",
-                version=version,
-            )
+            _write_wheel(distribution, "macosx_10_12_x86_64", version=version)
             rejected = _run_contract(
                 REPOSITORY_ROOT,
                 "assemble",

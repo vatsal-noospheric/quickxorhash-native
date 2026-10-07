@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-# Build and verify an isolated two-wheel release candidate; never publish it.
+# Build and verify an isolated three-wheel release candidate; never publish it.
 set -euo pipefail
 umask 022
 
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-  echo 'Usage: build_arm_wheels.sh [new-output-directory]'
-  echo 'Build and verify macOS ARM64 + manylinux ARM64 wheels for the declared version.'
-  echo 'Requires macOS ARM64, OrbStack Docker, Python 3.14, uv and Rust 1.97.1.'
+  echo 'Usage: build_release_wheels.sh [new-output-directory]'
+  echo 'Build and verify macOS ARM64, manylinux AArch64 and manylinux x86_64 wheels'
+  echo 'for the declared version.'
+  echo 'Requires macOS ARM64, Apple container with Rosetta, Python 3.14, uv and Rust 1.97.1.'
   exit 0
 fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-for command_name in python3.14 uv docker rsync; do
+for command_name in python3.14 uv container rsync; do
   command -v "$command_name" >/dev/null || { echo "Missing $command_name" >&2; exit 1; }
 done
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
-  echo "Run this combined build on macOS ARM64 with an ARM64 Docker runtime." >&2; exit 1;
+  echo "Run this combined build on macOS ARM64." >&2; exit 1;
+}
+arch -x86_64 /usr/bin/true 2>/dev/null || {
+  echo "Install Rosetta; the x86_64 Linux build runs under it." >&2; exit 1;
 }
 version="$(python3.14 - "$project_root/Cargo.toml" <<'PY'
 import sys, tomllib
@@ -23,7 +27,7 @@ with open(sys.argv[1], 'rb') as source:
     print(tomllib.load(source)['package']['version'])
 PY
 )"
-output_directory="${1:-$project_root/dist/releases/$version-arm64}"
+output_directory="${1:-$project_root/dist/releases/$version}"
 output_directory="$(python3.14 - "$output_directory" <<'PY'
 import sys
 from pathlib import Path
@@ -37,7 +41,9 @@ mac_rust_bin="${ARM_WHEEL_MAC_RUST_BIN:-$project_root/dist/arm-builder-cache/mac
 [[ "$("$mac_rust_bin/rustc" --version)" == rustc\ 1.97.1\ * ]] || {
   echo "Set ARM_WHEEL_MAC_RUST_BIN to a Rust 1.97.1 bin directory." >&2; exit 1;
 }
-linux_image='ghcr.io/pyo3/maturin@sha256:9f84fbea151ae578388e474eee6087867875fa3adfb11b572fa44150c65254ee'
+# ghcr.io/pyo3/maturin:v1.14.1, pinned per platform.
+aarch64_image='ghcr.io/pyo3/maturin@sha256:9f84fbea151ae578388e474eee6087867875fa3adfb11b572fa44150c65254ee'
+x86_64_image='ghcr.io/pyo3/maturin@sha256:9555e8d61da71b1daca6ffa81a619a8c67d8d3e41048281ce7d735732c94af34'
 evidence_directory="$project_root/dist/build-evidence/$(date -u +%Y%m%dT%H%M%SZ)-$version"
 source_directory="$evidence_directory/source"
 wheel_directory="$evidence_directory/wheels"
@@ -81,16 +87,21 @@ export PYTHONDONTWRITEBYTECODE=1
   "$mac_python" -m pytest -p no:cacheprovider
 ) 2>&1 | tee "$evidence_directory/macos.log"
 
-# Rust 1.97.1 and Python CPython 3.14 with the GIL; never select cp314t.
-docker run --rm -i --platform linux/arm64 --entrypoint /bin/bash \
-  --mount "type=bind,source=$source_directory,target=/source,readonly" \
-  --mount "type=bind,source=$wheel_directory,target=/wheels" \
-  --mount "type=bind,source=$cache_directory,target=/cache" \
-  -e CARGO_HOME=/cache/cargo -e RUSTUP_HOME=/cache/rustup \
-  -e RUSTUP_TOOLCHAIN=1.97.1 -e ARM_WHEEL_VERSION="$version" \
-  "$linux_image" -s <<'LINUX' 2>&1 | tee "$evidence_directory/linux.log"
+build_linux_wheel() {
+  local target_name="$1" platform="$2" machine="$3" image="$4"
+  local rosetta=()
+  [[ "$machine" == x86_64 ]] && rosetta=(--rosetta)
+  # Rust 1.97.1 and Python CPython 3.14 with the GIL; never select cp314t.
+  container run --rm -i --platform "$platform" ${rosetta[@]+"${rosetta[@]}"} --entrypoint /bin/bash \
+    --mount "type=bind,source=$source_directory,target=/source,readonly" \
+    --mount "type=bind,source=$wheel_directory,target=/wheels" \
+    --mount "type=bind,source=$cache_directory,target=/cache" \
+    -e CARGO_HOME=/cache/cargo -e RUSTUP_HOME=/cache/rustup \
+    -e RUSTUP_TOOLCHAIN=1.97.1 -e WHEEL_VERSION="$version" \
+    -e TARGET_NAME="$target_name" -e MACHINE="$machine" \
+    "$image" -s <<'LINUX' 2>&1 | tee "$evidence_directory/$target_name.log"
 set -euo pipefail
-[[ "$(uname -m)" == aarch64 ]]
+[[ "$(uname -m)" == "$MACHINE" ]]
 [[ "$(getconf GNU_LIBC_VERSION)" == 'glibc 2.17' ]]
 [[ "$(maturin --version)" == 'maturin 1.14.1' ]]
 rustup toolchain install 1.97.1 --profile minimal --component rustfmt,clippy --no-self-update
@@ -104,20 +115,24 @@ uv pip install --python /work/venv/bin/python 'pytest==9.1.1' 'ruff==0.16.3'
 export PYO3_PYTHON=/work/venv/bin/python
 export PYTHONDONTWRITEBYTECODE=1
 /work/venv/bin/python -c 'import sys; assert sys._is_gil_enabled(); print(sys.version)'
-/work/venv/bin/python -m tools.release_contract preflight --tag "v$ARM_WHEEL_VERSION"
+/work/venv/bin/python -m tools.release_contract preflight --tag "v$WHEEL_VERSION"
 /work/venv/bin/ruff check .
 /work/venv/bin/ruff format --check .
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --features pyo3/extension-module
-maturin build --release --locked --target aarch64-unknown-linux-gnu \
+maturin build --release --locked --target "$MACHINE-unknown-linux-gnu" \
   --interpreter /work/venv/bin/python --compatibility manylinux2014 --out /wheels
-linux_wheel="/wheels/quickxorhash_native-$ARM_WHEEL_VERSION-cp314-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
+linux_wheel="/wheels/quickxorhash_native-$WHEEL_VERSION-cp314-abi3-manylinux_2_17_$MACHINE.manylinux2014_$MACHINE.whl"
 /work/venv/bin/python -m tools.release_contract verify-wheel \
-  --target manylinux-aarch64 "$linux_wheel"
+  --target "$TARGET_NAME" "$linux_wheel"
 uv pip install --python /work/venv/bin/python --no-index --no-deps "$linux_wheel"
 /work/venv/bin/python -m pytest -p no:cacheprovider
 LINUX
+}
+
+build_linux_wheel manylinux-aarch64 linux/arm64 aarch64 "$aarch64_image"
+build_linux_wheel manylinux-x86_64 linux/amd64 x86_64 "$x86_64_image"
 
 (
   cd "$source_directory"
@@ -125,14 +140,15 @@ LINUX
 )
 mkdir -p "$output_directory"
 cp "$wheel_directory/"* "$output_directory/"
-python3.14 - "$output_directory" "$evidence_directory" "$linux_image" <<'PY'
+python3.14 - "$output_directory" "$evidence_directory" "$aarch64_image" "$x86_64_image" <<'PY'
 import json, sys
 from pathlib import Path
 output, evidence = map(Path, sys.argv[1:3])
 (evidence / 'build.json').write_text(json.dumps({
     'artifacts': str(output), 'evidence': str(evidence),
-    'linux_image': sys.argv[3], 'rust': '1.97.1', 'maturin': '1.14.1',
-    'targets': ['macos-arm64', 'manylinux-aarch64'], 'published': False,
+    'linux_images': {'manylinux-aarch64': sys.argv[3], 'manylinux-x86_64': sys.argv[4]},
+    'rust': '1.97.1', 'maturin': '1.14.1',
+    'targets': ['macos-arm64', 'manylinux-aarch64', 'manylinux-x86_64'], 'published': False,
 }, indent=2) + '\n')
 PY
 printf 'Verified wheels: %s\nBuild evidence: %s\n' "$output_directory" "$evidence_directory"

@@ -13,7 +13,7 @@ from quickxorhash_native import (
 
 
 def test_runtime_version_matches_version_two_release():
-    assert __version__ == "2.0.1"
+    assert __version__ == "2.0.2"
 
 
 def _hash_bytes(payload: bytes, chunk_size: int = 17):

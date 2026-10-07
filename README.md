@@ -89,46 +89,44 @@ maturin build --release --out dist
 Release candidates must pass the repository-owned release contract:
 
 ```bash
-python -m tools.release_contract preflight --tag v2.0.1
+python -m tools.release_contract preflight --tag v2.0.2
 python -m tools.release_contract verify-wheel \
-  --target macos-arm64 dist/quickxorhash_native-2.0.1-cp314-abi3-macosx_11_0_arm64.whl
-python -m tools.release_contract assemble --tag v2.0.1 --dist dist
+  --target macos-arm64 dist/quickxorhash_native-2.0.2-cp314-abi3-macosx_11_0_arm64.whl
+python -m tools.release_contract assemble --tag v2.0.2 --dist dist
 ```
 
 `verify-wheel` installs the wheel into a clean CPython 3.14 environment with
 Rust absent from `PATH`, then exercises the public hashing and checkpoint API.
 `preflight` validates the source metadata and release tag before any wheel
 builds start.
-`assemble` accepts exactly one macOS ARM64 wheel and one manylinux AArch64
-wheel, rejects source distributions and unexpected assets, and writes
-a sorted `SHA256SUMS` manifest.
+`assemble` accepts exactly one wheel for each release target (macOS ARM64,
+manylinux AArch64 and manylinux x86_64), rejects source distributions and
+unexpected assets, and writes a sorted `SHA256SUMS` manifest.
 
-## Local ARM64 wheel builds
+## Local release wheel builds
 
-On macOS ARM64 with OrbStack Docker running, use:
+On macOS ARM64 with Apple `container` running and Rosetta installed, use:
 
 ```bash
-tools/build_arm_wheels.sh
+tools/build_release_wheels.sh
 ```
 
-The command builds the current declared version for macOS ARM64 and Linux ARM64,
-verifies each installed wheel in a clean Python 3.14 environment, runs the
-complete Python and Rust contract suites, and assembles the two-wheel bundle
-with `SHA256SUMS`. It does not publish, install into the app environment, or
-perform Git actions. Existing output directories are preserved; pass a fresh
-output directory as the first argument for another run.
+The command builds the current declared version for macOS ARM64, Linux AArch64
+and Linux x86_64, verifies each installed wheel in a clean Python 3.14
+environment, runs the complete Python and Rust contract suites on each target,
+and assembles the three-wheel bundle with `SHA256SUMS`. It does not publish,
+install into the app environment, or perform Git actions. Existing output
+directories are preserved; pass a fresh output directory as the first argument
+for another run.
 
-The builder uses Rust 1.97.1, maturin 1.14.1 and a digest-pinned ARM64
-manylinux2014 image. Linux uses glibc 2.17 and GIL-enabled CPython 3.14.
-The macOS Rust installation lives under `dist/arm-builder-cache`; alternatively
-set `ARM_WHEEL_MAC_RUST_BIN` to an existing Rust 1.97.1 bin directory. The host
-needs `python3.14`, `uv`, Docker and `rsync`. Source snapshots, tool caches and
-verification logs remain under ignored `dist/` directories.
-
-The configured OrbStack Ubuntu shortcut is `~/.local/bin/quickxorhash-arm-wheels`.
-It launches the host builder through `macctl`; the
-Linux compiler and wheel tests still run in the ARM64 container. An ARM64 wheel
-cannot be installed into that x86_64 VM's Python interpreter.
+The builder uses Rust 1.97.1, maturin 1.14.1 and digest-pinned manylinux2014
+images (`ghcr.io/pyo3/maturin:v1.14.1`) for each Linux architecture. Linux uses
+glibc 2.17 and GIL-enabled CPython 3.14. The x86_64 container runs under
+Rosetta. The macOS Rust installation lives under `dist/arm-builder-cache`;
+alternatively set `ARM_WHEEL_MAC_RUST_BIN` to an existing Rust 1.97.1 bin
+directory. The host needs `python3.14`, `uv`, `container` and `rsync`. Source
+snapshots, tool caches and verification logs remain under ignored `dist/`
+directories.
 
 ## Licence
 
